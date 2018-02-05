@@ -46,8 +46,8 @@ class CRMControllerCronEmailCollector extends JControllerLegacy
         $this->userSettings = LibCron::getUsersSettings();
 
         $this->flags = "/imap/ssl/novalidate-cert";
-//        d($this->userSettings);
-//        exit();
+        d($this->userSettings);
+        exit();
     }
 
     protected function getLastMessage($messageIterator)
