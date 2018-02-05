@@ -44,10 +44,10 @@ class CRMControllerCronEmailCollector extends JControllerLegacy
         parent::__construct($config);
 
         $this->userSettings = LibCron::getUsersSettings();
-
-        $this->flags = "/imap/ssl/novalidate-cert";
-        d($this->userSettings);
-        exit();
+//        $this->flags = "/imap/ssl/novalidate-cert";
+//        d($this->userSettings);
+//        exit();
+        arhitech commit;
     }
 
     protected function getLastMessage($messageIterator)
@@ -104,7 +104,6 @@ class CRMControllerCronEmailCollector extends JControllerLegacy
                 $i++;
                 if ($i == 10)
                     break;
-
 
                 $message->keepUnseen(true);
                 $messageParser = new MessageParser($message);
