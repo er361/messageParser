@@ -26,7 +26,7 @@ class MessageParser
     protected $bodyText;
     protected $bodyContent;
 
-    public function __construct($message)
+    public function __construct(Message $message)
     {
         /* @var $message Message */
         libxml_use_internal_errors(true);
@@ -152,7 +152,8 @@ class MessageParser
     {
         /* @var $message Message */
         $message = $this->message;
-        $subject = $message->getSubject();
+        if ($message->getHeaders())
+            $subject = $message->getSubject();
         if (preg_match('/ref #:[0-9]+/', $subject)) {
             $id = $this->extractId($subject);
             if ($id) {

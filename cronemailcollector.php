@@ -14,6 +14,7 @@ use Ddeboer\Imap\Search\Date\After;
 use Ddeboer\Imap\Search\Text\Subject;
 use Ddeboer\Imap\SearchExpression;
 use Ddeboer\Imap\Server;
+use Ddeboer\Transcoder\Exception\UnsupportedEncodingException;
 use Kint;
 use MColl\helpers\AttachmentsHelper;
 use MColl\helpers\MessageParser;
@@ -44,10 +45,11 @@ class CRMControllerCronEmailCollector extends JControllerLegacy
         parent::__construct($config);
 
         $this->userSettings = LibCron::getUsersSettings();
-
         $this->flags = "/imap/ssl/novalidate-cert";
-        d($this->userSettings);
-        exit();
+
+
+//        d($this->userSettings);
+//        exit();
     }
 
     protected function getLastMessage($messageIterator)
@@ -58,57 +60,26 @@ class CRMControllerCronEmailCollector extends JControllerLegacy
         return $last;
     }
 
-    /*
-     * array_key_exists("profile_id", $fields) &&
-                   array_key_exists("recepient_email_id", $fields) &&
-                   array_key_exists("message_subject", $fields) &&
-                   array_key_exists("message_content", $fields) &&
-                   array_key_exists("message_content_plain", $fields) &&
-                   array_key_exists("message_date", $fields) &&
-                   array_key_exists("utc_timezone", $fields) &&
-                   array_key_exists("was_read", $fields) &&
-                   array_key_exists("owner_id", $fields) &&
-                   array_key_exists("message_direction", $fields)
-     */
     public function getNewMessages()
     {
         $inArray = [];
         $i = 0;
+
         foreach ($this->userSettings as $userSetting) {
             $i++;
-//            if ($i >= 2)
-//                break;
+
             $conf = $userSetting->settings->email_conf;
-//            d($userSetting);
-            if (!$conf->last_message_date) {
-                $this->setLastMessageDate();
-                continue;
-            }
-
-            //set datetime
-            $dateTime = new DateTime();
-            $dateTime->setTimestamp($conf->last_message_date);
-
-            //search
-            $search = new SearchExpression();
-            $search->addCondition(new After($dateTime));
-//            $search->addCondition(new Subject('Проверка Emails Collector'));
-//            $search->addCondition(new Subject('Lola Tech NDA v002 (1).pdf'));
 
             //get messages
-            $mailbox = $this->getMailBox($conf, 'INBOX');
-            $messageIterator = $mailbox->getMessages($search);
-            d($messageIterator->count());
-            $i = 0;
-            foreach ($messageIterator as $message) {
-                $i++;
-                if ($i == 10)
-                    break;
-
+            $messages = $this->getAllMessages($conf, $conf->last_message_date);
+//            continue;
+            foreach ($messages as $messageArr) {
+                $message = $messageArr['message'];
+                /* @var $message Message */
 
                 $message->keepUnseen(true);
                 $messageParser = new MessageParser($message);
-//                +d($message->getHeaders());
+
                 //set out
                 $params = [
                     'owner_id' => $userSetting->owner_id,
@@ -120,48 +91,23 @@ class CRMControllerCronEmailCollector extends JControllerLegacy
                 ];
 
                 $profiles = $this->getProfiles($params);
-//                if ($profiles) {
-//                    d($params);
-//                    d($message->getParts());
-//                    d($profiles);
-//                    die('profiles');
-//                }
-//                d($message->getHeaders());
-//                echo $this->getBodyHtml($message);
-//                d($message->getAttachments());
-//                d($message->getParts());
-//                d($message->getCc());
-//                d($message->getChildren());
-//                echo d($message->getParts());
-//                continue;
-//                $this->getMessageContent($message, $messageParser,);
-
-                $owner_id = (int)$userSetting->owner_id;
-                $messageId = $message->getId();
 
                 if ($profiles) {
-                    /*
-                     * Сохранять в html класса в дальнейшем
-                     * html модифицируеться другими методами
-                     * не явно с этой части кода, в дальнейшем переделать
-                     * чтобы модифицировался явно
-                    */
-
-                    $this->html = $messageParser->clearMessage();
-
                     $inArray['profiles'] = $profiles['data']['profiles'];
-                    $inArray['owner_id'] = $owner_id;
+                    $inArray['owner_id'] = (int)$userSetting->owner_id;
                     $inArray['message_subject'] = $message->getSubject();
-                    $inArray['message_content'] = $this->html;
+                    $inArray['message_content'] = $messageParser->clearMessage();
                     $inArray['message_content_full'] = $this->getBodyHtml($message);
                     $inArray['message_date'] = $message->getDate()->getTimestamp();
                     $inArray['utc_timezone'] = $message->getHeaders()->get('date')->format('P');
                     $inArray['was_read'] = $message->isSeen();
                     $inArray['parsing_message_id'] = $message->getId();
                     $inArray['message_direction'] = $profiles['data']['message_direction'];
-                    $inArray['messageObj'] = $message;
+                    $inArray['message_obj'] = $message;
                     $out[] = $inArray;
                 }
+
+                $this->setLastMessageDate($userSetting, $message->getDate()->getTimestamp());
             }
 
             if (!empty($out)) {
@@ -171,73 +117,60 @@ class CRMControllerCronEmailCollector extends JControllerLegacy
 
         if (!empty($outExt)) {
             return $outExt;
-        }
+        } else
+            return [];
     }
 
-    public function setLastMessageDate()
+    public function setLastMessageDate($userSetting, $timestamp)
     {
-        $out = [];
-        $i = 0;
-        foreach ($this->userSettings as $usersSetting) {
-            $i++;
-            $conf = $usersSetting->settings->email_conf;
+        LibDBMongo::log($userSetting, $timestamp);
 
-            $mailbox = $this->getMailBox($conf);
+        if (!$timestamp)
+            throw new Exception('timestamp is required');
 
-            //setup date time
-            $dateTime = new DateTime();
-            $dateTime->sub(new DateInterval('P1D'));
-
-            //search
-            $searchExpression = new SearchExpression();
-            $searchExpression->addCondition(new After($dateTime));
-
-            //get messages
-            $messageIterator = $mailbox->getMessages($searchExpression);
-
-            //get last message
-            if ($messageIterator->count() > 0)
-                $last = $this->getLastMessage($messageIterator);
-            else
-                $last = null;
-
-            //setLastMessageDate
-            if ($conf->last_messsage_date)
-                $lastMessageDate = $last->getDate()->getTimestamp();
-            else
-                $lastMessageDate = $dateTime->getTimestamp();
-
-
-            //set last message date
-            $params = [
-                'user_id' => $usersSetting->user_id,
-                'profile_id' => $usersSetting->profile_id,
-                'owner_id' => $usersSetting->owner_id,
-                'message_date' => $lastMessageDate
-            ];
-
-            $setLastMessageDate = LibCron::setLastMessageDate($params);
-            $out[] = $setLastMessageDate;
-        }
-
-        return $out;
+        //set last message date
+        $params = [
+            'user_id' => $userSetting->user_id,
+            'profile_id' => $userSetting->profile_id,
+            'owner_id' => $userSetting->owner_id,
+            'message_date' => $timestamp
+        ];
+        d($params);
+        $setLastMessageDate = LibCron::setLastMessageDate($params);
     }
 
     /**
      * @param $conf
-     * @param string $mailboxName
-     * @return \Ddeboer\Imap\Mailbox
+     * @param null $last_message_date
+     * @return array
      */
-    protected function getMailBox($conf, $mailboxName = 'INBOX')
+    protected function getAllMessages($conf, $last_message_date = null)
     {
         //connect
         $server = new Server($conf->host, $conf->incoming_port, $this->flags);
-
         $connection = $server->authenticate($conf->login, $conf->password);
 
-        //get mailbox
-        $mailbox = $connection->getMailbox($mailboxName);
-        return $mailbox;
+        //если дата не установлена находим послденее письмо
+        if (!$last_message_date) {
+
+            $preOut = $this->_getAllMessages($connection);
+            $last = end($preOut);
+
+            //устанавливаем последнюю дату этим письмом
+            $last_message_date = $last['date'];
+        }
+
+        //найти все письма поздее это даты
+        $dateTime = new DateTime();
+        $dateTime->setTimestamp($last_message_date);
+
+        //парамерты поиска письма
+        $searchExpression = new SearchExpression();
+        $searchExpression->addCondition(new After($dateTime));
+
+        $out = $this->_getAllMessages($connection, $searchExpression);
+
+        return $out;
     }
 
     /**
@@ -270,34 +203,44 @@ class CRMControllerCronEmailCollector extends JControllerLegacy
     }
 
 
-    public function test()
+    public function start()
     {
         //get new messages
         $newMessages = $this->getNewMessages();
-
-        //save files to db
+        d($newMessages);
+        die('start');
+//        save files to db
         foreach ($newMessages as $messageArr) {
             foreach ($messageArr as $message) {
-//                d($message['messageObj']);
-                $messageObj = $message['messageObj'];
-                $insertMessageId = LibDBMongo::insertMessage($message);
-                $owner_id = $message['owner_id'];
+                $insertMessage = LibDBMongo::insertMessage($message);
+                /* @var $message_obj Message */
+                $message_obj = $message['message_obj'];
 
-                if ($this->messageHasAttachments($messageObj)) {
-                    $saveFilesToDb = $this->saveFilesToDb($messageObj, $owner_id, $insertMessageId);
-                    /* не работает ибо надо переделать всю архитектуру */
-                    if ($this->messageHasInlineAttachments($messageObj))
-                        $this->saveInlineFilesToDb($messageObj, $owner_id, $insertMessageId);
-                    foreach ($messageObj->getAttachments() as $attachment) {
-                        AttachmentsHelper::downloadAttachments($attachment);
+                if ($insertMessage['success'] == true)
+                    if ($this->messageHasAttachments($message_obj)) {
+                        $attachmentFilesNames = $this->getAttachmentFilesNames($message_obj);
+                        $what = LibCron::setEmailAttachments([
+                            'owner_id' => $message['owner_id'],
+                            'message_id' => $insertMessage['message_id'],
+                            'files_names' => $attachmentFilesNames
+                        ]);
+
+                        $this->downLoadIFiles($message_obj);
                     }
-                }
-                //set last message date to mailbox
-                $this->setLastMessageDate();
             }
-
         }
-        d($newMessages);
+    }
+
+    protected function getAttachmentFilesNames(Message $message)
+    {
+        $out = [];
+        foreach ($message->getAttachments() as $attachment) {
+            $out[] = (object)[
+                'file_name' => AttachmentsHelper::getHashFileName($attachment),
+                'src' => trim($attachment->getStructure()->id, '<>')
+            ];
+        }
+        return $out;
     }
 
     /**
@@ -325,63 +268,80 @@ class CRMControllerCronEmailCollector extends JControllerLegacy
         return count($message->getAttachments() > 0);
     }
 
-    private function saveFilesToDb(Message $message, $owner_id, $message_id)
-    {
-        $attachmentFilesNames = [];
-        foreach ($message->getAttachments() as $attachment) {
-            if ($attachment->getDisposition() == 'attachment')
-                $attachmentFilesNames[] = AttachmentsHelper::getHashFileName($attachment);
-        }
-
-        $result = LibCron::setEmailAttachments([
-            'owner_id' => $owner_id,
-            'message_id' => $message_id,
-            'files_names' => $attachmentFilesNames
-        ]);
-
-        if ($result['success'] == true)
-            return $attachmentFilesNames;
-        return false;
-    }
-
-    private function saveInlineFilesToDb(Message $message, $owner_id, $message_id)
+    /**
+     * @param $message_obj
+     * @return mixed
+     */
+    protected function getInlineFiles($message_obj)
     {
         $inlineFiles = [];
-        foreach ($message->getAttachments() as $attachment) {
-            if ($attachment->getDisposition() == 'inline')
-                $inlineFiles[] = AttachmentsHelper::getHashFileName($attachment);
-        }
+        foreach ($message_obj->getAttachments() as $attachment) {
+            if ($attachment->getDisposition() == 'inline') {
+                $id = $attachment->getStructure()->id;
+                $clearId = trim($id, '<>');
 
-        $result = LibCron::setEmailAttachments([
-            'owner_id' => $owner_id,
-            'message_id' => $message_id,
-            'files_names' => $inlineFiles
-        ]);
-
-        if ($result['success'] == true) {
-            $i = 0;
-            foreach ($message->getAttachments() as $attachment) {
-                if ($attachment->getDisposition() == 'inline') {
-                    $id = $attachment->getStructure()->id;
-                    $file = $result['data']['files'][$i];
-                    $html = AttachmentsHelper::findAndReplaceImgPath($id, $file->file_id, $this->html);
-                    $this->html = $html;
-                    $i++;
-                }
+                $inlineFiles[] = [
+                    'file_name' => AttachmentsHelper::getHashFileName($attachment),
+                    'src' => $clearId
+                ];
             }
-            return $inlineFiles;
         }
-        return false;
+        LibDBMongo::log("inline_files: {$inlineFiles}");
+        return $inlineFiles;
     }
 
-    private function messageHasInlineAttachments(Message $message)
+    /**
+     * @param $message_obj
+     */
+    protected function downLoadIFiles($message_obj)
     {
-        foreach ($message->getAttachments() as $attachment) {
-            if ($attachment->getDisposition() == 'inline')
-                return true;
+        foreach ($message_obj->getAttachments() as $attachment) {
+            AttachmentsHelper::downloadAttachments($attachment);
         }
-        return false;
     }
 
+    /**
+     * @param $connection
+     * @param $searchExpression
+     * @param $inArr
+     * @param $preOut
+     * @return array
+     */
+    protected function _getAllMessages($connection, $searchExpression = null)
+    {
+        $inArr = [];
+        $out = [];
+        foreach ($connection->getMailboxes() as $mailbox) {
+            /* @var $mailbox \Ddeboer\Imap\Mailbox */
+            $i = 0;
+            try {
+                foreach ($mailbox->getMessages($searchExpression) as $message) {
+                    $i++;
+//                    if ($i == 3)
+//                        break;
+                    $date = $message->getDate() ? $message->getDate()->getTimestamp() : 0;
+
+                    $inArr['date'] = $date;
+                    $inArr['message'] = $message;
+
+                    $out[] = $inArr;
+                }
+
+            } catch (UnsupportedEncodingException $exception) {
+                LibDBMongo::log($exception->getMessage());
+            }
+        }
+
+        d(count($out));
+        die('ss');
+        //get column date
+        foreach ($out as $key => $row)
+            $dateArr[$key] = $row['date'];
+
+        //отсортировать по дате
+        if (is_array($dateArr))
+            array_multisort($dateArr, SORT_ASC, $out);
+        return $out;
+    }
 
 }

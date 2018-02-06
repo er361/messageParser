@@ -33,26 +33,29 @@ class AttachmentsHelper
 
         if (static::allowToSave($attachment->getSubtype())) {
             $hashFileName = static::getHashFileName($attachment);
+            $dirPath = __DIR__ . '/../attachments/';
+            if(!file_exists($dirPath))
+                mkdir($dirPath);
             $path = __DIR__ . '/../attachments/' . $hashFileName;
             return file_put_contents($path, $attachment->getDecodedContent());
         }
         return false;
     }
 
-    public static function findAndReplaceImgPath($cid, $dbFileName = 0,$html)
-    {
-        $DOMXPath = new \DOMXPath(static::getDom($html));
-        $clearId = trim($cid, '<>');
-        $query = '//img[contains(@src,"' . $clearId . '")]';
-        $DOMNodeList = $DOMXPath->query($query);
-        if ($DOMNodeList instanceof \DOMNodeList and $DOMNodeList->length > 0) {
-            $DOMElement = $DOMNodeList->item(0);
-            $DOMElement->setAttribute('src',$dbFileName);
-            d($DOMElement->getAttribute('src'));
-        }
-        $saveHTML = $DOMXPath->document->saveHTML($DOMXPath->document->documentElement);
-        return $saveHTML;
-    }
+//    public static function getImgCid($html)
+//    {
+//        $DOMXPath = new \DOMXPath(static::getDom($html));
+////        $clearId = trim($cid, '<>');
+//        $query = '//img[contains(@src,"' . $clearId . '")]';
+//        $DOMNodeList = $DOMXPath->query($query);
+//        if ($DOMNodeList instanceof \DOMNodeList and $DOMNodeList->length > 0) {
+//            $DOMElement = $DOMNodeList->item(0);
+//            $DOMElement->setAttribute('src',$dbFileName);
+//            d($DOMElement->getAttribute('src'));
+//        }
+//        $saveHTML = $DOMXPath->document->saveHTML($DOMXPath->document->documentElement);
+//        return $saveHTML;
+//    }
 
     private static function getDom($html)
     {
